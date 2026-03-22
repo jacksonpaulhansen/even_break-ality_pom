@@ -171,6 +171,39 @@ function mapEventTypeToAction(eventType?: OsEventTypeList): InputAction | null {
   return null;
 }
 
+function explainPublishError(errorText: string): string {
+  const lower = errorText.toLowerCase();
+
+  if (lower.includes('repository not found')) {
+    return [
+      'Publish failed: GitHub repository was not found.',
+      'Do this:',
+      '1) Open Create Repo and create this exact repo under your GitHub user.',
+      '2) Or update Link Git/Repo with the exact existing repo name.',
+      '3) Click Save Link, then Publish App again.',
+    ].join('\n');
+  }
+
+  if (lower.includes('permission to') && lower.includes('denied')) {
+    return [
+      'Publish failed: signed-in git account does not have push access to this repo.',
+      'Do this:',
+      '1) Click Switch Git Account and sign in with the repo owner/collaborator account.',
+      '2) Click Save Link to confirm remote URL.',
+      '3) Click Publish App again.',
+    ].join('\n');
+  }
+
+  if (lower.includes('placeholder repo url detected')) {
+    return [
+      'Publish failed: placeholder repo URL is still configured.',
+      'Open Link Git/Repo, enter GitHub user + repo, then click Save Link.',
+    ].join('\n');
+  }
+
+  return errorText;
+}
+
 async function createStartupPage(): Promise<void> {
   if (!bridge) {
     return;
@@ -239,13 +272,13 @@ async function publishQr(): Promise<void> {
     console.error('Publish failed:', error);
     state.publishStatus = 'FAILED';
     const errorText = String(error);
-    if (errorText.includes('Placeholder git config detected')) {
+    if (errorText.includes('Placeholder git config detected') || errorText.includes('Placeholder repo URL detected')) {
       state.linkOpen = true;
       linkPanel.classList.remove('hidden');
       publishLog.textContent =
         'Git config is still placeholder. Open Link Git/Repo, enter GitHub user + repo, then click Save Link, then Publish.';
     } else {
-      publishLog.textContent = errorText;
+      publishLog.textContent = explainPublishError(errorText);
     }
   }
 
