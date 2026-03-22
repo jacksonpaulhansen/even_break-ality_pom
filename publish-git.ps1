@@ -294,11 +294,12 @@ if ($hasStagedChanges) {
 if ($originExists) {
   Write-Info "Pushing branch '$branch' to origin"
   Invoke-Git @("push", "-u", "origin", $branch)
-  if (-not $config.git.PSObject.Properties.Match('deployed')) {
-    $config.git | Add-Member -NotePropertyName deployed -NotePropertyValue $true
-  } else {
-    $config.git.deployed = $true
+  $gitMap = @{}
+  foreach ($p in $config.git.PSObject.Properties) {
+    $gitMap[$p.Name] = $p.Value
   }
+  $gitMap['deployed'] = $true
+  $config.git = [pscustomobject]$gitMap
   ($config | ConvertTo-Json -Depth 8) | Set-Content $configPath
 } else {
   Write-Info "No origin remote configured. Skipping push."
