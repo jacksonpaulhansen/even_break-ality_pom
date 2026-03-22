@@ -320,7 +320,7 @@ const server = http.createServer(async (req, res) => {
         let userEmail = String(payload.userEmail ?? '').trim();
         const githubUser = String(payload.githubUser ?? '').trim();
         const repoName = String(payload.repoName ?? '').trim();
-        const branch = String(payload.branch ?? 'main').trim() || 'main';
+        const branch = String(payload.branch ?? 'master').trim() || 'master';
 
         if (!githubUser || !repoName) {
           sendJson(res, 400, { ok: false, error: 'githubUser and repoName are required' });

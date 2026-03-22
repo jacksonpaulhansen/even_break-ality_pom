@@ -17,6 +17,7 @@ type AppState = {
   connection: 'connecting' | 'hub' | 'browser';
   publishStatus: string;
   linkOpen: boolean;
+  deployed: boolean;
 };
 
 const MODES = ['HELLO G2', 'READY', 'SIMULATOR'];
@@ -30,6 +31,7 @@ const state: AppState = {
   connection: 'connecting',
   publishStatus: 'IDLE',
   linkOpen: false,
+  deployed: false,
 };
 
 let bridge: EvenAppBridge | null = null;
@@ -113,6 +115,7 @@ async function render(): Promise<void> {
   const hudText = buildHudText();
   hudPreview.textContent = hudText;
   publishStatus.textContent = state.publishStatus;
+  publishBtn.textContent = state.deployed ? 'Update App' : 'Publish App';
 
   try {
     await pushHudToEvenHub();
@@ -231,6 +234,7 @@ async function publishQr(): Promise<void> {
 
     state.publishStatus = 'DONE';
     publishLog.textContent = body?.logs ?? 'Publish complete.';
+    state.deployed = true;
   } catch (error) {
     console.error('Publish failed:', error);
     state.publishStatus = 'FAILED';
@@ -385,7 +389,7 @@ async function saveGitLink(): Promise<void> {
       body: JSON.stringify({
         githubUser,
         repoName,
-        branch: 'main',
+        branch: 'master',
       }),
     });
     const body = (await response.json().catch(() => null)) as { error?: string; remoteUrl?: string; publishUrl?: string } | null;
@@ -394,6 +398,8 @@ async function saveGitLink(): Promise<void> {
     }
 
     publishLog.textContent = `Linked: ${body?.remoteUrl}\nPublish URL: ${body?.publishUrl}\nNow click Publish.`;
+    state.deployed = false;
+    await render();
   } catch (error) {
     publishLog.textContent = `Save link failed: ${String(error)}`;
   } finally {
@@ -478,6 +484,12 @@ async function init(): Promise<void> {
   } catch {
     publishLog.textContent = 'Control server not reachable. Run Run-Even-Sim.cmd.';
   }
+
+  try {
+    const response = await fetch('http://127.0.0.1:8787/config', { cache: 'no-store' });
+    const body = (await response.json().catch(() => null)) as { config?: { git?: { deployed?: boolean } } } | null;
+    state.deployed = !!body?.config?.git?.deployed;
+  } catch {}
 
   try {
     bridge = await Promise.race([

@@ -143,7 +143,7 @@ if (-not $enabled) {
 
 $branch = [string]$gitConfig.branch
 if (-not $branch) {
-  $branch = "main"
+  $branch = "master"
 }
 
 $userName = [string]$gitConfig.userName
@@ -166,6 +166,21 @@ if (-not $git) {
 if (-not (Test-Path ".git")) {
   Write-Info "Initializing git repo with branch '$branch'"
   Invoke-Git @("init", "-b", $branch)
+}
+
+# Ensure target branch exists and is checked out.
+$branchExists = $false
+try {
+  & git rev-parse --verify $branch *> $null
+  if ($LASTEXITCODE -eq 0) {
+    $branchExists = $true
+  }
+} catch {}
+
+if ($branchExists) {
+  Invoke-Git @("switch", $branch)
+} else {
+  Invoke-Git @("switch", "-c", $branch)
 }
 
 if ($users.Count -gt 0) {
@@ -279,6 +294,8 @@ if ($hasStagedChanges) {
 if ($originExists) {
   Write-Info "Pushing branch '$branch' to origin"
   Invoke-Git @("push", "-u", "origin", $branch)
+  $config.git.deployed = $true
+  ($config | ConvertTo-Json -Depth 8) | Set-Content $configPath
 } else {
   Write-Info "No origin remote configured. Skipping push."
 }
