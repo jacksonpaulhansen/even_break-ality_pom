@@ -1,30 +1,28 @@
 {
   "appName": "Even G2 Base App",
-  "publishUrl": "https://jacksonpaulhansen.github.io/EvenRealitiesG2_BaseSimpleApp/",
+  "publishUrl": "https://jacksonpaulhansen.github.io/even-g2-base-app/",
+  "github": {
+    "owner": "jacksonpaulhansen",
+    "repo": "even-g2-base-app",
+    "pat": ""
+  },
   "git": {
-    "branch": "master",
-    "repos": [
-      "https://github.com/your-user/your-repo.git",
-      "https://github.com/jacksonpaulhansen/EvenRealitiesG2_BaseSimpleApp.git",
-      "https://github.com/jacksonpaulhansen/EvenRealitiesG2_BaseSimpleAppNew.git",
-      "https://github.com/jacksonpaulhansen/jacksonpaulhansen/EvenRealitiesG2_BaseSimpleApp.git"
-    ],
     "enabled": true,
+    "userName": "jacksonpaulhansen",
+    "userEmail": "270181675+jacksonpaulhansen@users.noreply.github.com",
+    "remoteUrl": "https://github.com/jacksonpaulhansen/even-g2-base-app.git",
+    "branch": "master",
     "commitMessagePrefix": "publish",
-    "userEmail": "128513998+jhansenIPAutomation@users.noreply.github.com",
+    "autoSetGithubPagesUrl": true,
     "users": [
       {
-        "name": "Your Name",
-        "email": "you@example.com"
-      },
-      {
-        "name": "jhansenIPAutomation",
-        "email": "128513998+jhansenIPAutomation@users.noreply.github.com"
+        "name": "jacksonpaulhansen",
+        "email": "270181675+jacksonpaulhansen@users.noreply.github.com"
       }
     ],
-    "userName": "jhansenIPAutomation",
-    "remoteUrl": "https://github.com/jacksonpaulhansen/EvenRealitiesG2_BaseSimpleApp.git",
-    "autoSetGithubPagesUrl": true,
-    "deployed": true
+    "repos": [
+      "https://github.com/jacksonpaulhansen/even-g2-base-app.git"
+    ],
+    "deployed": false
   }
 }

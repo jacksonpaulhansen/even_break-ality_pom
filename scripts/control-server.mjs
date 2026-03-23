@@ -7,7 +7,7 @@ import fs from 'node:fs';
 const host = '127.0.0.1';
 const port = 8787;
 const projectRoot = process.cwd();
-const apiVersion = '2026-03-22-link-git-ui-1';
+const apiVersion = '2026-03-22-publish-app-1';
 
 let publishRunning = false;
 let publishStartedAt = 0;
@@ -40,6 +40,23 @@ function writeConfig(config) {
   fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }
 
+function readLocalSecrets() {
+  const secretsPath = path.join(projectRoot, '.app.secrets.local.json');
+  if (!fs.existsSync(secretsPath)) {
+    return {};
+  }
+  try {
+    return JSON.parse(fs.readFileSync(secretsPath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalSecrets(secrets) {
+  const secretsPath = path.join(projectRoot, '.app.secrets.local.json');
+  fs.writeFileSync(secretsPath, `${JSON.stringify(secrets, null, 2)}\n`, 'utf8');
+}
+
 function runGit(args) {
   return new Promise((resolve, reject) => {
     const git = spawn('git', args, {
@@ -66,16 +83,69 @@ function runGit(args) {
   });
 }
 
-async function readGitConfigValue(scope, key) {
-  try {
-    const output = await runGit(['config', scope, key]);
-    return String(output).trim();
-  } catch {
-    return '';
-  }
+function runGitWithPat(args, owner, repo, token) {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env, GITHUB_TOKEN: token };
+    const askpassPath = path.join(projectRoot, 'scripts', 'git-askpass.cmd');
+    env.GIT_ASKPASS = askpassPath;
+
+    const git = spawn('git', args, {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+
+    let output = '';
+    git.stdout.on('data', (chunk) => {
+      output += String(chunk);
+    });
+    git.stderr.on('data', (chunk) => {
+      output += String(chunk);
+    });
+    git.on('error', reject);
+    git.on('close', (code) => {
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(new Error(output || `git ${args.join(' ')} failed with code ${code}`));
+      }
+    });
+  });
 }
 
-function runPublish() {
+async function githubApi({ token, method, pathName, body }) {
+  const response = await fetch(`https://api.github.com${pathName}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {}
+
+  return { response, json, text };
+}
+
+function sanitizeRepoName(name) {
+  const clean = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
+  return clean || 'even-g2-app';
+}
+
+function runPublishLegacy() {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(projectRoot, 'publish-qr.ps1');
     const ps = spawn(
@@ -128,21 +198,6 @@ function triggerReboot() {
   ps.unref();
 }
 
-function triggerLinkGit() {
-  const scriptPath = path.join(projectRoot, 'link-git.ps1');
-  const child = spawn(
-    'cmd',
-    ['/c', 'start', '""', 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', scriptPath],
-    {
-      cwd: projectRoot,
-      windowsHide: false,
-      detached: true,
-      stdio: 'ignore',
-    },
-  );
-  child.unref();
-}
-
 function triggerSwitchGitAccount() {
   const scriptPath = path.join(projectRoot, 'switch-git-account.ps1');
   const child = spawn(
@@ -168,6 +223,219 @@ function openUrl(url) {
   child.unref();
 }
 
+async function generateQrForUrl(publishUrl) {
+  await new Promise((resolve, reject) => {
+    const node = spawn('node', ['scripts/generate-qr.mjs', publishUrl], {
+      cwd: projectRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    node.stdout.on('data', (chunk) => {
+      output += String(chunk);
+    });
+    node.stderr.on('data', (chunk) => {
+      output += String(chunk);
+    });
+
+    node.on('error', reject);
+    node.on('close', (code) => {
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(new Error(output || `QR generation failed with code ${code}`));
+      }
+    });
+  });
+
+  const htmlPath = path.join(projectRoot, 'publish-qr.html');
+  if (fs.existsSync(htmlPath)) {
+    openUrl(htmlPath);
+  }
+}
+
+async function runPublishApp(appName, patInput) {
+  const logs = [];
+  const config = readConfig();
+  const secrets = readLocalSecrets();
+
+  config.github = config.github || {};
+  const token = (patInput || secrets.githubPat || '').trim();
+  if (!token) {
+    const err = new Error('PAT_REQUIRED');
+    err.code = 'PAT_REQUIRED';
+    throw err;
+  }
+
+  const userResult = await githubApi({ token, method: 'GET', pathName: '/user' });
+  if (!userResult.response.ok) {
+    throw new Error('Invalid GitHub PAT. Please provide a valid token with repo/workflow/pages permissions.');
+  }
+
+  const owner = String(userResult.json?.login || '').trim();
+  if (!owner) {
+    throw new Error('Failed to resolve GitHub user from PAT.');
+  }
+
+  const repo = sanitizeRepoName(appName);
+  const remoteUrl = `https://github.com/${owner}/${repo}.git`;
+  const publishUrl = `https://${owner}.github.io/${repo}/`;
+
+  // Create repo if needed.
+  const createRepoResult = await githubApi({
+    token,
+    method: 'POST',
+    pathName: '/user/repos',
+    body: {
+      name: repo,
+      private: false,
+      auto_init: false,
+    },
+  });
+
+  if (createRepoResult.response.status === 201) {
+    logs.push(`Created repo: ${owner}/${repo}`);
+  } else if (createRepoResult.response.status === 422) {
+    logs.push(`Repo already exists: ${owner}/${repo}`);
+  } else if (!createRepoResult.response.ok) {
+    throw new Error(`GitHub repo create failed: ${createRepoResult.text || createRepoResult.response.status}`);
+  }
+
+  const branch = 'master';
+  const userName = owner;
+  const ghId = String(userResult.json?.id ?? '').trim();
+  const userEmail = ghId
+    ? `${ghId}+${owner}@users.noreply.github.com`
+    : `${owner}@users.noreply.github.com`;
+
+  config.appName = appName;
+  config.publishUrl = publishUrl;
+  config.github.owner = owner;
+  config.github.repo = repo;
+  config.github.pat = '';
+  config.git = config.git || {};
+  config.git.enabled = true;
+  config.git.userName = userName;
+  config.git.userEmail = userEmail;
+  config.git.remoteUrl = remoteUrl;
+  config.git.branch = branch;
+  config.git.commitMessagePrefix = config.git.commitMessagePrefix || 'publish';
+  config.git.autoSetGithubPagesUrl = true;
+  config.git.users = Array.isArray(config.git.users) ? config.git.users : [];
+  config.git.repos = Array.isArray(config.git.repos) ? config.git.repos : [];
+  config.git.deployed = false;
+
+  if (!config.git.users.some((u) => u?.name === userName && u?.email === userEmail)) {
+    config.git.users.push({ name: userName, email: userEmail });
+  }
+  if (!config.git.repos.includes(remoteUrl)) {
+    config.git.repos.push(remoteUrl);
+  }
+
+  writeConfig(config);
+  if (patInput && patInput.trim()) {
+    secrets.githubPat = token;
+    writeLocalSecrets(secrets);
+  }
+
+  if (!fs.existsSync(path.join(projectRoot, '.git'))) {
+    await runGit(['init', '-b', branch]);
+  }
+
+  // ensure branch exists and checked out
+  try {
+    await runGit(['switch', branch]);
+  } catch {
+    await runGit(['switch', '-c', branch]);
+  }
+
+  await runGit(['config', 'user.name', userName]);
+  await runGit(['config', 'user.email', userEmail]);
+  await runGit(['config', 'credential.helper', 'manager']);
+
+  try {
+    await runGit(['remote', 'add', 'origin', remoteUrl]);
+  } catch {
+    await runGit(['remote', 'set-url', 'origin', remoteUrl]);
+  }
+
+  await runGit(['add', '-A']);
+  const diffOutput = await runGit(['diff', '--cached', '--name-only']);
+  const hasChanges = diffOutput.trim().length > 0;
+  if (hasChanges) {
+    await runGit([
+      '-c',
+      `user.name=${userName}`,
+      '-c',
+      `user.email=${userEmail}`,
+      'commit',
+      '-m',
+      `publish ${new Date().toISOString().replace('T', ' ').slice(0, 19)}`,
+    ]);
+    logs.push('Committed local changes');
+  } else {
+    logs.push('No new file changes to commit');
+  }
+
+  await runGitWithPat(['push', '-u', remoteUrl, `${branch}:${branch}`], owner, repo, token);
+  logs.push('Pushed to origin/master');
+
+  // Enable Pages with workflow build type.
+  const pagesPut = await githubApi({
+    token,
+    method: 'PUT',
+    pathName: `/repos/${owner}/${repo}/pages`,
+    body: { build_type: 'workflow' },
+  });
+
+  if (!pagesPut.response.ok) {
+    const pagesPost = await githubApi({
+      token,
+      method: 'POST',
+      pathName: `/repos/${owner}/${repo}/pages`,
+      body: { build_type: 'workflow' },
+    });
+    if (!pagesPost.response.ok && pagesPost.response.status !== 409) {
+      logs.push(`Pages enable warning: ${pagesPost.text || pagesPost.response.status}`);
+    } else {
+      logs.push('GitHub Pages enabled');
+    }
+  } else {
+    logs.push('GitHub Pages enabled');
+  }
+
+  // Trigger deploy workflow
+  const workflowDispatch = await githubApi({
+    token,
+    method: 'POST',
+    pathName: `/repos/${owner}/${repo}/actions/workflows/deploy-pages.yml/dispatches`,
+    body: { ref: branch },
+  });
+
+  if (workflowDispatch.response.status === 204) {
+    logs.push('Triggered Deploy GitHub Pages workflow');
+  } else {
+    logs.push(`Workflow dispatch warning: ${workflowDispatch.text || workflowDispatch.response.status}`);
+  }
+
+  const finalConfig = readConfig();
+  finalConfig.git = finalConfig.git || {};
+  finalConfig.git.deployed = true;
+  writeConfig(finalConfig);
+
+  await generateQrForUrl(publishUrl);
+  openUrl(publishUrl);
+
+  return {
+    logs: logs.join('\n'),
+    publishUrl,
+    remoteUrl,
+    owner,
+    repo,
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
     sendJson(res, 404, { ok: false, error: 'Not found' });
@@ -184,7 +452,7 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       service: 'control-server',
       version: apiVersion,
-      capabilities: ['publish', 'reboot', 'link-git', 'switch-git-account'],
+      capabilities: ['publish', 'publish-app', 'reboot', 'link-git', 'switch-git-account'],
     });
     return;
   }
@@ -192,11 +460,17 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/config') {
     try {
       const config = readConfig();
+      const secrets = readLocalSecrets();
       sendJson(res, 200, {
         ok: true,
         config: {
           appName: config.appName ?? '',
           publishUrl: config.publishUrl ?? '',
+          github: {
+            owner: config.github?.owner ?? '',
+            repo: config.github?.repo ?? '',
+            hasPat: !!String(secrets.githubPat ?? '').trim(),
+          },
           git: config.git ?? {},
         },
       });
@@ -225,7 +499,7 @@ const server = http.createServer(async (req, res) => {
     publishRunning = true;
     publishStartedAt = Date.now();
     try {
-      const logs = await runPublish();
+      const logs = await runPublishLegacy();
       lastPublish = {
         ok: true,
         error: '',
@@ -249,6 +523,60 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && req.url === '/publish-app') {
+    if (publishRunning && Date.now() - publishStartedAt > 300000) {
+      publishRunning = false;
+      publishStartedAt = 0;
+    }
+
+    if (publishRunning) {
+      sendJson(res, 409, { ok: false, error: 'Publish already running' });
+      return;
+    }
+
+    let body = '';
+    req.on('data', (chunk) => {
+      body += String(chunk);
+    });
+    req.on('end', async () => {
+      publishRunning = true;
+      publishStartedAt = Date.now();
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const appNameRaw = String(payload.appName ?? '').trim();
+        const appName = appNameRaw || 'even-g2-app';
+        const pat = String(payload.pat ?? '').trim();
+
+        const result = await runPublishApp(appName, pat);
+        lastPublish = {
+          ok: true,
+          error: '',
+          logs: result.logs,
+          at: new Date().toISOString(),
+        };
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        const errText = String(error);
+        const isPatRequired = errText.includes('PAT_REQUIRED');
+        lastPublish = {
+          ok: false,
+          error: errText,
+          logs: errText,
+          at: new Date().toISOString(),
+        };
+        sendJson(res, isPatRequired ? 400 : 500, {
+          ok: false,
+          error: isPatRequired ? 'PAT_REQUIRED' : errText,
+          code: isPatRequired ? 'PAT_REQUIRED' : undefined,
+        });
+      } finally {
+        publishRunning = false;
+        publishStartedAt = 0;
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/reboot') {
     if (publishRunning) {
       sendJson(res, 409, { ok: false, error: 'Cannot reboot while publish is running' });
@@ -261,21 +589,6 @@ const server = http.createServer(async (req, res) => {
         triggerReboot();
       } catch {}
     }, 250);
-    return;
-  }
-
-  if (req.method === 'POST' && req.url === '/link-git') {
-    if (publishRunning) {
-      sendJson(res, 409, { ok: false, error: 'Cannot link git while publish is running' });
-      return;
-    }
-
-    try {
-      triggerLinkGit();
-      sendJson(res, 200, { ok: true, message: 'Git/Repo setup wizard opened in a new terminal window.' });
-    } catch (error) {
-      sendJson(res, 500, { ok: false, error: String(error) });
-    }
     return;
   }
 
@@ -325,8 +638,6 @@ const server = http.createServer(async (req, res) => {
         if (repoName.endsWith('.git')) {
           repoName = repoName.slice(0, -4);
         }
-
-        // Accept either "repo" or "owner/repo" in repoName.
         if (repoName.includes('/')) {
           const parts = repoName.split('/').filter(Boolean);
           if (parts.length >= 2) {
@@ -343,42 +654,23 @@ const server = http.createServer(async (req, res) => {
         const config = readConfig();
         const gitCfg = config.git || {};
 
-        if (userName === 'Your Name') {
-          userName = '';
-        }
-        if (userEmail === 'you@example.com') {
-          userEmail = '';
-        }
+        if (userName === 'Your Name') userName = '';
+        if (userEmail === 'you@example.com') userEmail = '';
 
-        if (!userName) {
-          userName = String(gitCfg.userName ?? '').trim();
-        }
-        if (!userEmail) {
-          userEmail = String(gitCfg.userEmail ?? '').trim();
-        }
-        if (userName === 'Your Name') {
-          userName = '';
-        }
-        if (userEmail === 'you@example.com') {
-          userEmail = '';
-        }
-        if (!userName) {
-          userName = await readGitConfigValue('--global', 'user.name');
-        }
-        if (!userEmail) {
-          userEmail = await readGitConfigValue('--global', 'user.email');
-        }
-        if (!userName) {
-          userName = githubUser;
-        }
-        if (!userEmail) {
-          userEmail = `${githubUser}@users.noreply.github.com`;
-        }
+        if (!userName) userName = String(gitCfg.userName ?? '').trim();
+        if (!userEmail) userEmail = String(gitCfg.userEmail ?? '').trim();
+        if (userName === 'Your Name') userName = '';
+        if (userEmail === 'you@example.com') userEmail = '';
+        if (!userName) userName = githubUser;
+        if (!userEmail) userEmail = `${githubUser}@users.noreply.github.com`;
 
         const remoteUrl = `https://github.com/${githubUser}/${repoName}.git`;
         const publishUrl = `https://${githubUser}.github.io/${repoName}/`;
 
         config.publishUrl = publishUrl;
+        config.github = config.github || {};
+        config.github.owner = githubUser;
+        config.github.repo = repoName;
         config.git = config.git || {};
         config.git.enabled = true;
         config.git.userName = userName;
