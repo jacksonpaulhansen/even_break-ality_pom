@@ -304,7 +304,7 @@ async function runPublishApp(appName, patInput) {
     throw new Error(`GitHub repo create failed: ${createRepoResult.text || createRepoResult.response.status}`);
   }
 
-  const branch = 'master';
+  const branch = 'main';
   const userName = owner;
   const ghId = String(userResult.json?.id ?? '').trim();
   const userEmail = ghId
@@ -345,13 +345,6 @@ async function runPublishApp(appName, patInput) {
     await runGit(['init', '-b', branch]);
   }
 
-  // ensure branch exists and checked out
-  try {
-    await runGit(['switch', branch]);
-  } catch {
-    await runGit(['switch', '-c', branch]);
-  }
-
   await runGit(['config', 'user.name', userName]);
   await runGit(['config', 'user.email', userEmail]);
   await runGit(['config', 'credential.helper', 'manager']);
@@ -380,8 +373,8 @@ async function runPublishApp(appName, patInput) {
     logs.push('No new file changes to commit');
   }
 
-  await runGitWithPat(['push', '-u', remoteUrl, `${branch}:${branch}`], owner, repo, token);
-  logs.push('Pushed to origin/master');
+  await runGitWithPat(['push', '-u', remoteUrl, `HEAD:${branch}`], owner, repo, token);
+  logs.push(`Pushed to origin/${branch}`);
 
   // Enable Pages with workflow build type.
   const pagesPut = await githubApi({
@@ -641,7 +634,7 @@ const server = http.createServer(async (req, res) => {
         let userEmail = String(payload.userEmail ?? '').trim();
         let githubUser = String(payload.githubUser ?? '').trim();
         let repoName = String(payload.repoName ?? '').trim();
-        const branch = String(payload.branch ?? 'master').trim() || 'master';
+        const branch = String(payload.branch ?? 'main').trim() || 'main';
 
         if (repoName.endsWith('.git')) {
           repoName = repoName.slice(0, -4);
