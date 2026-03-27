@@ -143,7 +143,7 @@ if (-not $enabled) {
 
 $branch = [string]$gitConfig.branch
 if (-not $branch) {
-  $branch = "master"
+  $branch = "main"
 }
 
 $userName = [string]$gitConfig.userName

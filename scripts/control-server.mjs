@@ -407,7 +407,7 @@ async function runPublishApp(appName, patInput) {
     pathName: '/user/repos',
     body: {
       name: repo,
-      private: false,
+      private: true,
       auto_init: false,
     },
   });
@@ -421,7 +421,7 @@ async function runPublishApp(appName, patInput) {
     throw new Error(`GitHub repo create failed: ${createRepoResult.text || createRepoResult.response.status}`);
   }
 
-  const branch = 'master';
+  const branch = 'main';
   const userName = owner;
   const ghId = String(userResult.json?.id ?? '').trim();
   const userEmail = ghId
@@ -788,7 +788,7 @@ const server = http.createServer(async (req, res) => {
         let userEmail = String(payload.userEmail ?? '').trim();
         let githubUser = String(payload.githubUser ?? '').trim();
         let repoName = String(payload.repoName ?? '').trim();
-        const branch = String(payload.branch ?? 'master').trim() || 'master';
+        const branch = String(payload.branch ?? 'main').trim() || 'main';
 
         if (repoName.endsWith('.git')) {
           repoName = repoName.slice(0, -4);

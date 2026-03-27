@@ -1,35 +1,59 @@
-# Even G2 Base App
+# Even Breakality (Pomodoro for Even G2)
 
-Minimal template for Even Hub simulator-first development.
+Simulator-first Pomodoro app for Even G2 / Even Hub.
 
-## One-time setup
+## Features
 
-1. Put your target URL in `app.config.json`:
-   - `publishUrl`: the URL you want encoded into the QR code.
-2. Install dependencies once:
+- Focus/Break timer
+- Gesture input support:
+  - `Click` = start/pause
+  - `Double Click` = reset current mode
+  - `Up` = switch to Focus
+  - `Down` = switch to Break
+- Transition modes:
+  - `AUTO`: switches mode after transition duration
+  - `MANUAL`: flashes, then shows `CLICK to continue` on HUD
+- Transition flash customization:
+  - Flash A char + qty
+  - Optional Flash B alternate char + qty
+  - Flash interval (`ms`)
+
+## Run locally
+
+1. Install once:
    - `npm install`
+2. Start with runner:
+   - `run-even-sim.ps1`
+3. Runner starts:
+   - app dev server: `http://127.0.0.1:5173`
+   - control server: `http://127.0.0.1:8787`
+   - Even Hub simulator (if installed/found)
 
-## Daily use (no manual npm commands)
+## User Settings
 
-1. Run `run-even-sim.ps1` (double-click or PowerShell).
-2. It starts:
-   - local app dev server (`127.0.0.1:5173`)
-   - local control bridge (`127.0.0.1:8787`)
-   - Even Hub simulator (if found)
-3. In the app page, click **Publish**:
-   - choose git user and repo from config menus (or manual entry)
-   - performs git add/commit/push
-   - triggers `publish-qr.ps1`
-   - generates `publish-qr.png` and opens `publish-qr.html`
-4. Click **Link Git/Repo** to run a guided wizard:
-   - pre-fills git name/email when possible
-   - asks GitHub username + repo name
-   - opens GitHub sign-in/create-repo pages
-   - writes git/publish URLs to `app.config.json`
-   - updates local git origin remote
-5. Click **Reboot App** any time to restart local app services (`5173` + `8787`) and relaunch the runner.
+- `Focus` (mins, decimal allowed)
+- `Break` (mins, decimal allowed)
+- `Transition`:
+  - `Method`: `AUTO` or `MANUAL`
+  - `Sec`: transition duration
+- `Flash A`:
+  - `Char`
+  - `Qty`
+- `Flash B`:
+  - enable/disable via checkbox in header
+  - `Flash` (ms), `Char`, `Qty`
 
-## Important
+## Debug Tools
 
-- **Publish does not deploy your app**. It only creates a QR from `publishUrl`.
-- For real glasses testing, `publishUrl` must be reachable by your phone/Even app.
+- `Publish App`
+- `Build EHPK`
+- Event + publish logs
+
+Debug tools can be hidden for end users via `HIDE_DEBUG_TOOLS` in `src/main.ts`.
+Local dev toggle shortcut: `Ctrl+Shift+D`.
+
+## Publish notes
+
+- Publish flow now targets `main` branch.
+- New repos created by publish flow are private by default.
+- If GitHub Pages deploy fails, verify repository Pages source is set to `GitHub Actions`.
